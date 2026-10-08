@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Personal Expense Tracker</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--text:#1c2030;--muted:#6b7285;--line:#e4e7ef;--accent:#4f46e5;--accent-t:#fff;--danger:#dc2626;--bar:#c7d2fe;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12141c;--card:#1b1e29;--text:#eceef5;--muted:#9097ac;--line:#2b2f3e;--accent:#818cf8;--accent-t:#10121a;--danger:#f87171;--bar:#3a3f7a}}
+:root[data-theme="dark"]{--bg:#12141c;--card:#1b1e29;--text:#eceef5;--muted:#9097ac;--line:#2b2f3e;--accent:#818cf8;--accent-t:#10121a;--danger:#f87171;--bar:#3a3f7a}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:4px 0 14px}
+h2{font-size:15px;margin:0 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:3px}
+input{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--text);font:inherit}
+.full{grid-column:1/-1}
+button{font:inherit;border:0;border-radius:9px;padding:9px 14px;cursor:pointer;background:var(--accent);color:var(--accent-t)}
+button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+button.sm{padding:4px 9px;font-size:13px}
+button.del{background:transparent;color:var(--danger);border:1px solid var(--line)}
+.row{display:flex;gap:8px;align-items:end;flex-wrap:wrap}
+.row>div{flex:1;min-width:130px}
+.total{font-size:30px;font-weight:700;margin:2px 0}
+.muted{color:var(--muted);font-size:13px}
+.cat{margin:8px 0}
+.cat .top{display:flex;justify-content:space-between;font-size:14px}
+.track{height:8px;background:var(--line);border-radius:6px;overflow:hidden;margin-top:3px}
+.fill{height:100%;background:var(--accent);border-radius:6px}
+.item{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.amt{font-weight:600;white-space:nowrap;text-align:right}
+.tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;background:var(--bar);color:var(--text)}
+.acts{display:flex;gap:6px;margin-top:6px;justify-content:flex-end}
+.empty{text-align:center;color:var(--muted);padding:18px 0}
+</style>
+</head>
+<body>
+<main>
+<h1>💰 Personal Expense Tracker</h1>
+
+<section class="card">
+  <h2 id="formTitle">Add expense</h2>
+  <div class="grid">
+    <div class="full"><label>Title</label><input id="title" placeholder="e.g. Lunch"></div>
+    <div><label>Amount</label><input id="amount" type="number" min="0" step="0.01" inputmode="decimal"></div>
+    <div><label>Date</label><input id="date" type="date"></div>
+    <div><label>Category</label><input id="category" list="cats" placeholder="Food, Travel…"><datalist id="cats"></datalist></div>
+    <div><label>Note (optional)</label><input id="note"></div>
+    <div class="full row"><button id="save">Add expense</button><button id="cancel" class="ghost" hidden>Cancel</button><span id="msg" class="muted"></span></div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="row">
+    <div><label>Month</label><input id="month" type="month"></div>
+    <div><label>Search</label><input id="q" placeholder="Title, category or note"></div>
+  </div>
+  <label style="margin-top:10px;display:flex;gap:6px;align-items:center"><input id="all" type="checkbox" style="width:auto"> Show all months</label>
+</section>
+
+<section class="card">
+  <div class="muted" id="totalLabel">Monthly total</div>
+  <div class="total" id="total">0.00</div>
+  <div class="muted" id="count"></div>
+</section>
+
+<section class="card">
+  <h2>Category-wise expenses</h2>
+  <div id="catList"></div>
+</section>
+
+<section class="card">
+  <h2>Expenses</h2>
+  <div id="list"></div>
+</section>
+</main>
+
+<script>
+const KEY = 'expense-tracker-v1';
+let expenses = [], editId = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => n.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+const today = () => new Date().toISOString().slice(0,10);
+
+function load(){ try{ expenses = JSON.parse(localStorage.getItem(KEY)) || []; }catch(e){ expenses = []; } }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(expenses)); }catch(e){ $('msg').textContent = 'Could not save (storage unavailable).'; } }
+
+function resetForm(){
+  editId = null;
+  ['title','amount','category','note'].forEach(i => $(i).value = '');
+  $('date').value = today();
+  $('formTitle').textContent = 'Add expense';
+  $('save').textContent = 'Add expense';
+  $('cancel').hidden = true;
+}
+
+function saveExpense(){
+  const title = $('title').value.trim(), amount = parseFloat($('amount').value);
+  if (!title || !(amount > 0)) { $('msg').textContent = 'Enter a title and a positive amount.'; return; }
+  const data = {
+    title, amount: Math.round(amount*100)/100,
+    category: ($('category').value.trim() || 'Other').replace(/\b\w/g, c => c.toUpperCase()),
+    date: $('date').value || today(), note: $('note').value.trim()
+  };
+  if (editId) Object.assign(expenses.find(e => e.id === editId), data);
+  else expenses.push({id: Date.now(), ...data});
+  save(); $('msg').textContent = editId ? 'Updated.' : 'Added.';
+  resetForm(); render();
+}
+
+function startEdit(id){
+  const e = expenses.find(x => x.id === id); if (!e) return;
+  editId = id;
+  $('title').value = e.title; $('amount').value = e.amount; $('date').value = e.date;
+  $('category').value = e.category; $('note').value = e.note;
+  $('formTitle').textContent = 'Edit expense';
+  $('save').textContent = 'Save changes';
+  $('cancel').hidden = false;
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function remove(id){
+  if (!confirm('Delete this expense?')) return;
+  expenses = expenses.filter(e => e.id !== id);
+  save(); render();
+}
+
+function render(){
+  const all = $('all').checked, month = $('month').value, q = $('q').value.toLowerCase().trim();
+  $('month').disabled = all;
+  const scoped = expenses.filter(e => all || e.date.startsWith(month));
+  const total = scoped.reduce((s,e) => s + e.amount, 0);
+  $('total').textContent = fmt(total);
+  $('totalLabel').textContent = all ? 'Total (all months)' : 'Monthly total';
+  $('count').textContent = scoped.length + ' expense' + (scoped.length === 1 ? '' : 's');
+
+  const sums = {};
+  scoped.forEach(e => sums[e.category] = (sums[e.category] || 0) + e.amount);
+  const cats = Object.entries(sums).sort((a,b) => b[1]-a[1]);
+  $('catList').innerHTML = cats.length ? cats.map(([c,v]) =>
+    `<div class="cat"><div class="top"><span>${esc(c)}</span><span>${fmt(v)} · ${(v/total*100).toFixed(0)}%</span></div><div class="track"><div class="fill" style="width:${v/total*100}%"></div></div></div>`
+  ).join('') : '<div class="empty">No expenses for this period.</div>';
+
+  const shown = scoped.filter(e => !q || [e.title,e.category,e.note].some(s => s.toLowerCase().includes(q)))
+                      .sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
+  $('list').innerHTML = shown.length ? shown.map(e =>
+    `<div class="item"><div><strong>${esc(e.title)}</strong><div class="muted">${esc(e.date)} · <span class="tag">${esc(e.category)}</span></div>${e.note ? `<div class="muted">${esc(e.note)}</div>` : ''}</div>
+     <div><div class="amt">${fmt(e.amount)}</div><div class="acts"><button class="sm ghost" data-edit="${e.id}">Edit</button><button class="sm del" data-del="${e.id}">Delete</button></div></div></div>`
+  ).join('') : `<div class="empty">${q ? 'No matches found.' : 'Nothing here yet — add your first expense.'}</div>`;
+
+  $('cats').innerHTML = [...new Set(expenses.map(e => e.category))].map(c => `<option value="${esc(c)}">`).join('');
+}
+
+$('save').onclick = saveExpense;
+$('cancel').onclick = () => { resetForm(); $('msg').textContent = ''; };
+['month','q','all'].forEach(i => $(i).addEventListener('input', render));
+$('list').addEventListener('click', e => {
+  const t = e.target;
+  if (t.dataset.edit) startEdit(+t.dataset.edit);
+  if (t.dataset.del) remove(+t.dataset.del);
+});
+
+load();
+$('month').value = today().slice(0,7);
+resetForm(); render();
+</script>
+</body>
+</html>
